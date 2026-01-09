@@ -11,12 +11,10 @@ const CONFIG = {
   }
 }
 
-// Simple referral tracking system using localStorage
+// Simple referral tracking using localStorage
 interface ReferralData {
-  // Store which wallet referred which new users
-  referrals: Record<string, string[]>; // referrerWallet -> array of referred wallet addresses
-  // Store which referrer a user came from
-  referrers: Record<string, string>; // userWallet -> referrerWallet
+  referrals: Record<string, string[]>;
+  referrers: Record<string, string>;
 }
 
 const getReferralData = (): ReferralData => {
@@ -34,20 +32,17 @@ const saveReferralData = (data: ReferralData) => {
 
 const trackReferral = (referrerWallet: string, newUserWallet: string) => {
   const data = getReferralData()
-  
-  // Track which referrer this user came from
+
   data.referrers[newUserWallet] = referrerWallet
-  
-  // Add this user to the referrer's list
+
   if (!data.referrals[referrerWallet]) {
     data.referrals[referrerWallet] = []
   }
-  
-  // Only add if not already tracked (prevent duplicates)
+
   if (!data.referrals[referrerWallet].includes(newUserWallet)) {
     data.referrals[referrerWallet].push(newUserWallet)
   }
-  
+
   saveReferralData(data)
   console.log(`Tracked referral: ${referrerWallet} -> ${newUserWallet}`)
 }
@@ -62,11 +57,12 @@ const getReferrer = (walletAddress: string): string | null => {
   return data.referrers[walletAddress] || null
 }
 
+
 // Connect Button Component
 function ConnectButton() {
   const { connect, disconnect, isConnected, wallet } = useWallet()
   const navigate = useNavigate()
-  
+
   const handleConnect = async () => {
     try {
       await connect({ feeMode: 'paymaster' })
@@ -75,12 +71,12 @@ function ConnectButton() {
       console.error('Connection failed:', error)
     }
   }
-  
+
   const handleDisconnect = async () => {
     await disconnect()
     navigate('/')
   }
-  
+
   if (isConnected && wallet) {
     return (
       <div className="connected">
@@ -91,7 +87,7 @@ function ConnectButton() {
       </div>
     )
   }
-  
+
   return (
     <button onClick={handleConnect} className="connect-btn">
       🔐 Login with Passkey
@@ -99,314 +95,181 @@ function ConnectButton() {
   )
 }
 
-// Home Page (Login Page)
+
+// Home Page
 function HomePage() {
-  const { isConnected } = useWallet()
+  const { isConnected, wallet } = useWallet()
   const navigate = useNavigate()
-  
+
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected && wallet) {
       navigate('/dashboard')
     }
-  }, [isConnected, navigate])
-  
+  }, [isConnected, wallet, navigate])
+
   return (
     <div className="home">
       <header>
         <h1>🎯 Simple Lazorkit Demo</h1>
         <ConnectButton />
       </header>
-      
-      <div className="hero">
-        <h2>Experience Passwordless Solana</h2>
-        <p>Login with passkey, generate referral links, earn rewards</p>
-        <div className="cta-container">
-          <ConnectButton />
-        </div>
-      </div>
-      
-      <div className="features">
-        <div className="feature">
-          <div>🔑</div>
-          <h3>Passkey Auth</h3>
-          <p>Biometric login, no passwords</p>
-        </div>
-        <div className="feature">
-          <div>🔗</div>
-          <h3>Referral System</h3>
-          <p>Share links, track on-chain</p>
-        </div>
-        <div className="feature">
-          <div>⛽</div>
-          <h3>Gasless</h3>
-          <p>No SOL needed</p>
-        </div>
-      </div>
     </div>
   )
 }
 
-// Referral Landing Page (when someone clicks referral link)
+
+// Referral Landing Page
 function ReferralLanding() {
-  const { refCode } = useParams<{ refCode: string }>()
+  const { refCode } = useParams()
   const navigate = useNavigate()
-  const { connect, isConnected } = useWallet()
-  
-  // Store the referrer code when page loads
+  const { connect, isConnected, wallet } = useWallet()
+
+  // Save referral code
   useEffect(() => {
-    if (refCode && refCode.startsWith('ref_')) {
-      // Store the referrer code in sessionStorage (clears when tab closes)
-      sessionStorage.setItem('pendingReferrer', refCode)
-      console.log(`Set pending referrer: ${refCode}`)
+    if (refCode?.startsWith("ref_")) {
+      sessionStorage.setItem("pendingReferrer", refCode)
+      console.log("Saved referral:", refCode)
     }
   }, [refCode])
-  
-  // When user connects, track the referral
+
+  // Track referral after wallet is connected
   useEffect(() => {
-    const trackReferralOnConnect = async () => {
-      if (isConnected) {
-        const pendingReferrer = sessionStorage.getItem('pendingReferrer')
-        
-        if (pendingReferrer && pendingReferrer.startsWith('ref_')) {
-          // Extract the referrer's wallet address from ref_abc123def format
-          const referrerWallet = pendingReferrer.replace('ref_', '')
-          
-          // Get current user's wallet
-          const { wallet } = useWallet()
-          if (wallet) {
-            // Track the referral
-            trackReferral(referrerWallet, wallet.smartWallet)
-            
-            // Clear the pending referrer
-            sessionStorage.removeItem('pendingReferrer')
-            console.log(`Tracked referral from ${referrerWallet} to ${wallet.smartWallet}`)
-          }
-        }
-        
-        navigate('/dashboard')
-      }
+    if (!isConnected || !wallet) return
+
+    const pendingReferrer = sessionStorage.getItem("pendingReferrer")
+
+    if (pendingReferrer) {
+      const referrerWallet = pendingReferrer.replace("ref_", "")
+      trackReferral(referrerWallet, wallet.smartWallet)
+
+      sessionStorage.removeItem("pendingReferrer")
+      console.log("Referral tracked:", referrerWallet, wallet.smartWallet)
     }
-    
-    trackReferralOnConnect()
-  }, [isConnected, navigate])
-  
+
+    navigate('/dashboard')
+  }, [isConnected, wallet, navigate])
+
+
   const handleJoin = async () => {
     try {
       await connect({ feeMode: 'paymaster' })
-    } catch (error) {
-      console.error('Connection failed:', error)
+    } catch (err) {
+      console.error("Join failed:", err)
     }
   }
-  
+
   return (
     <div className="referral-landing">
-      <header>
-        <h1>🎯 Simple Lazorkit Demo</h1>
-        <ConnectButton />
-      </header>
-      
-      <div className="referral-content">
-        <h1>🎁 You're invited!</h1>
-        <p>You were referred by: <strong>{refCode}</strong></p>
-        
-        <div className="referral-info">
-          <p>Join using passkey authentication (no seed phrases!)</p>
-          <button onClick={handleJoin} className="join-btn">
-            Accept Invitation & Join
-          </button>
-        </div>
-        
-        <div className="referral-benefits">
-          <h3>Benefits:</h3>
-          <ul>
-            <li>✅ No seed phrases - login with fingerprint/face ID</li>
-            <li>✅ Gasless transactions - no SOL needed</li>
-            <li>✅ Referral rewards for both you and your friend</li>
-          </ul>
-        </div>
-        
-        <div className="referral-debug">
-          <p><small>Debug: Referral code stored: {sessionStorage.getItem('pendingReferrer') || 'none'}</small></p>
-        </div>
-      </div>
+      <h1>🎁 You've been invited!</h1>
+      <p>Referral Code: {refCode}</p>
+
+      <button onClick={handleJoin} className="join-btn">
+        Accept & Join
+      </button>
     </div>
   )
 }
 
+
 // Dashboard Page
 function Dashboard() {
-  const { wallet, disconnect, signMessage } = useWallet()
+  const { wallet, disconnect, isConnected, signMessage } = useWallet()
+  const navigate = useNavigate()
+
   const [copied, setCopied] = useState(false)
   const [claimed, setClaimed] = useState(false)
   const [loading, setLoading] = useState(false)
   const [referralCount, setReferralCount] = useState(0)
   const [referredBy, setReferredBy] = useState<string | null>(null)
-  const navigate = useNavigate()
-  
-  // Load referral data
+
+  // Wait for wallet hydration
+  useEffect(() => {
+    if (isConnected && !wallet) return
+    if (!isConnected) navigate('/')
+  }, [isConnected, wallet, navigate])
+
+  // Load referral stats
   useEffect(() => {
     if (wallet) {
-      const count = getReferralCount(wallet.smartWallet)
-      setReferralCount(count)
-      
-      const referrer = getReferrer(wallet.smartWallet)
-      setReferredBy(referrer)
-      
-      console.log(`Wallet ${wallet.smartWallet} has ${count} referrals`)
-      console.log(`Referred by: ${referrer || 'No one'}`)
+      setReferralCount(getReferralCount(wallet.smartWallet))
+      setReferredBy(getReferrer(wallet.smartWallet))
     }
   }, [wallet])
-  
-  // Redirect to home if not connected
-  useEffect(() => {
-    if (!wallet) {
-      navigate('/')
-    }
-  }, [wallet, navigate])
-  
-  // Generate referral link
-  const referralCode = wallet ? `ref_${wallet.smartWallet.slice(0, 8)}` : ''
+
+  if (!wallet) return null
+
+  // Referral code must include FULL wallet
+  const referralCode = `ref_${wallet.smartWallet}`
   const referralLink = `${window.location.origin}/#/ref/${referralCode}`
-  
+
   const copyLink = () => {
     navigator.clipboard.writeText(referralLink)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    setTimeout(() => setCopied(false), 1500)
   }
-  
-  const claimBadge = async () => {
-    if (!wallet || loading) return
-    
-    setLoading(true)
-    try {
-      const message = `Claim Welcome Badge for wallet: ${wallet.smartWallet} at ${Date.now()}`
-      console.log('Signing message:', message)
-      
-      const result = await signMessage(message)
-      console.log('Signature received:', result.signature)
-      
-      setClaimed(true)
-      alert('✅ Badge claimed successfully!\nSignature: ' + result.signature.slice(0, 20) + '...')
-    } catch (error: any) {
-      console.error('Failed to claim badge:', error)
-      alert(`Failed to claim badge: ${error.message || 'Unknown error'}`)
-    } finally {
-      setLoading(false)
-    }
-  }
-  
+
   const handleDisconnect = async () => {
     await disconnect()
     navigate('/')
   }
-  
-  // const handleTestReferral = () => {
-  //   // Create a test referral (for demo purposes)
-  //   if (wallet) {
-  //     const testWallet = 'test_wallet_' + Date.now()
-  //     trackReferral(wallet.smartWallet, testWallet)
-  //     setReferralCount(prev => prev + 1)
-  //     alert('✅ Test referral added! Refresh to see actual referrals from links.')
-  //   }
-  // }
-  
-  // const handleResetData = () => {
-  //   if (window.confirm('Reset all referral data? This cannot be undone.')) {
-  //     localStorage.removeItem('referralData')
-  //     setReferralCount(0)
-  //     setReferredBy(null)
-  //     alert('Referral data reset!')
-  //   }
-  // }
-  
-  if (!wallet) return null
-  
-  // Calculate points (10 points per referral)
+
+  const claimBadge = async () => {
+    if (claimed || loading) return
+
+    setLoading(true)
+    try {
+      const msg = `Claim welcome badge for ${wallet.smartWallet}`
+      const sig = await signMessage(msg)
+
+      setClaimed(true)
+      alert('Badge claimed!\nSignature: ' + sig.signature.slice(0, 20) + '...')
+    } catch (err: any) {
+      console.error(err)
+      alert("Failed to claim badge: " + err.message)
+    }
+    setLoading(false)
+  }
+
   const points = referralCount * 10
-  
+
   return (
     <div className="dashboard">
       <header>
-        <h1>📊 Your Dashboard</h1>
-        <div className="header-actions">
-          <button onClick={handleDisconnect} className="disconnect-btn">
-            Disconnect
-          </button>
-        </div>
+        <h1>📊 Dashboard</h1>
+        <button onClick={handleDisconnect} className="disconnect-btn">Logout</button>
       </header>
-      
+
       <div className="user-card">
-        <div className="avatar">
-          {wallet?.accountName?.charAt(0) || 'U'}
-        </div>
-        <div>
-          <h2>Welcome back!</h2>
-          <p className="wallet-address">
-            {wallet?.smartWallet.slice(0, 12)}...
-          </p>
-          {referredBy && (
-            <p className="referred-by">
-              👥 Referred by: {referredBy.slice(0, 8)}...
-            </p>
-          )}
-        </div>
+        <h2>Welcome!</h2>
+        <p>Wallet: {wallet.smartWallet.slice(0, 12)}...</p>
+        {referredBy && <p>Referred by: {referredBy.slice(0, 8)}...</p>}
       </div>
-      
+
       <div className="referral-section">
-        <h3>📤 Your Referral Link</h3>
-        <p className="help-text">Share this link with friends. When they join, your count increases!</p>
-        <div className="link-box">
-          <input 
-            type="text" 
-            value={referralLink} 
-            readOnly 
-            className="link-input"
-          />
-          <button onClick={copyLink} className="copy-btn">
-            {copied ? '✅ Copied!' : '📋 Copy'}
-          </button>
-        </div>
-        
+        <h3>Your Referral Link</h3>
+        <input value={referralLink} readOnly className="link-input" />
+        <button onClick={copyLink} className="copy-btn">
+          {copied ? "Copied!" : "Copy"}
+        </button>
+
         <div className="referral-stats">
-          <div className="stat">
-            <span className="stat-number">{referralCount}</span>
-            <span className="stat-label">Referrals</span>
-          </div>
-          <div className="stat">
-            <span className="stat-number">{points}</span>
-            <span className="stat-label">Points</span>
-          </div>
-          <div className="stat">
-            <span className="stat-number">{referredBy ? 'Yes' : 'No'}</span>
-            <span className="stat-label">Referred</span>
-          </div>
+          <p>Referrals: {referralCount}</p>
+          <p>Points: {points}</p>
         </div>
       </div>
-      
+
       <div className="task-section">
-        <h3>✅ Complete Tasks</h3>
-        <div className="task">
-          <div className="task-header">
-            <span>Claim Welcome Badge</span>
-            <span className="task-status">
-              {claimed ? '✅ Completed' : '❌ Pending'}
-            </span>
-          </div>
-          <button 
-            onClick={claimBadge} 
-            disabled={claimed || loading}
-            className="task-btn"
-          >
-            {loading ? 'Signing...' : claimed ? '✅ Claimed' : '🖋️ Sign Message (Gasless)'}
-          </button>
-          <p className="task-note">Signs a message with your passkey. No SOL required.</p>
-        </div>
+        <h3>Claim Welcome Badge</h3>
+        <button onClick={claimBadge} disabled={claimed || loading}>
+          {claimed ? "Claimed" : loading ? "Signing..." : "Sign to Claim"}
+        </button>
       </div>
     </div>
   )
 }
 
-// Main App with HashRouter
+
+// Main App
 function AppContent() {
   return (
     <Router>
