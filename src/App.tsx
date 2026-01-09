@@ -1,5 +1,5 @@
 import { LazorkitProvider, useWallet } from '@lazorkit/wallet'
-import { BrowserRouter, Routes, Route, useParams, useNavigate } from 'react-router-dom'
+import { HashRouter as Router, Routes, Route, useParams, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import './App.css'
 
@@ -276,15 +276,14 @@ function Dashboard() {
 // Main App with Router
 function AppContent() {
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/ref/:refCode" element={<ReferralLanding />} />
-        {/* Catch-all route redirects to home */}
         <Route path="*" element={<HomePage />} />
       </Routes>
-    </BrowserRouter>
+    </Router>
   )
 }
 
