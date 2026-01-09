@@ -11,25 +11,55 @@ const CONFIG = {
   }
 }
 
-// Store referral counts in localStorage for demo
-const getReferralCount = (walletAddress: string): number => {
+// Simple referral tracking system using localStorage
+interface ReferralData {
+  // Store which wallet referred which new users
+  referrals: Record<string, string[]>; // referrerWallet -> array of referred wallet addresses
+  // Store which referrer a user came from
+  referrers: Record<string, string>; // userWallet -> referrerWallet
+}
+
+const getReferralData = (): ReferralData => {
   try {
-    const counts = JSON.parse(localStorage.getItem('referralCounts') || '{}')
-    return counts[walletAddress] || 0
+    const data = localStorage.getItem('referralData')
+    return data ? JSON.parse(data) : { referrals: {}, referrers: {} }
   } catch {
-    return 0
+    return { referrals: {}, referrers: {} }
   }
 }
 
-const incrementReferralCount = (walletAddress: string) => {
-  try {
-    const counts = JSON.parse(localStorage.getItem('referralCounts') || '{}')
-    counts[walletAddress] = (counts[walletAddress] || 0) + 1
-    localStorage.setItem('referralCounts', JSON.stringify(counts))
-    return counts[walletAddress]
-  } catch {
-    return 0
+const saveReferralData = (data: ReferralData) => {
+  localStorage.setItem('referralData', JSON.stringify(data))
+}
+
+const trackReferral = (referrerWallet: string, newUserWallet: string) => {
+  const data = getReferralData()
+  
+  // Track which referrer this user came from
+  data.referrers[newUserWallet] = referrerWallet
+  
+  // Add this user to the referrer's list
+  if (!data.referrals[referrerWallet]) {
+    data.referrals[referrerWallet] = []
   }
+  
+  // Only add if not already tracked (prevent duplicates)
+  if (!data.referrals[referrerWallet].includes(newUserWallet)) {
+    data.referrals[referrerWallet].push(newUserWallet)
+  }
+  
+  saveReferralData(data)
+  console.log(`Tracked referral: ${referrerWallet} -> ${newUserWallet}`)
+}
+
+const getReferralCount = (walletAddress: string): number => {
+  const data = getReferralData()
+  return data.referrals[walletAddress]?.length || 0
+}
+
+const getReferrer = (walletAddress: string): string | null => {
+  const data = getReferralData()
+  return data.referrers[walletAddress] || null
 }
 
 // Connect Button Component
@@ -122,35 +152,42 @@ function ReferralLanding() {
   const navigate = useNavigate()
   const { connect, isConnected } = useWallet()
   
-  // Track referral visit
+  // Store the referrer code when page loads
   useEffect(() => {
-    if (refCode) {
-      // Store the referrer code for when user signs up
-      localStorage.setItem('referrer', refCode)
-      console.log(`Referral visit from: ${refCode}`)
+    if (refCode && refCode.startsWith('ref_')) {
+      // Store the referrer code in sessionStorage (clears when tab closes)
+      sessionStorage.setItem('pendingReferrer', refCode)
+      console.log(`Set pending referrer: ${refCode}`)
     }
   }, [refCode])
   
+  // When user connects, track the referral
   useEffect(() => {
-    if (isConnected) {
-      // Get referrer from localStorage
-      const referrer = localStorage.getItem('referrer')
-      if (referrer && referrer.startsWith('ref_')) {
-        // Extract wallet address from ref_abc123def format
-        const referrerWallet = referrer.replace('ref_', '')
+    const trackReferralOnConnect = async () => {
+      if (isConnected) {
+        const pendingReferrer = sessionStorage.getItem('pendingReferrer')
         
-        // In a real app, you'd send this to your backend/on-chain
-        console.log(`User connected via referral from: ${referrerWallet}`)
+        if (pendingReferrer && pendingReferrer.startsWith('ref_')) {
+          // Extract the referrer's wallet address from ref_abc123def format
+          const referrerWallet = pendingReferrer.replace('ref_', '')
+          
+          // Get current user's wallet
+          const { wallet } = useWallet()
+          if (wallet) {
+            // Track the referral
+            trackReferral(referrerWallet, wallet.smartWallet)
+            
+            // Clear the pending referrer
+            sessionStorage.removeItem('pendingReferrer')
+            console.log(`Tracked referral from ${referrerWallet} to ${wallet.smartWallet}`)
+          }
+        }
         
-        // Increment referral count for the referrer
-        incrementReferralCount(referrerWallet)
-        
-        // Clear the referrer after processing
-        localStorage.removeItem('referrer')
+        navigate('/dashboard')
       }
-      
-      navigate('/dashboard')
     }
+    
+    trackReferralOnConnect()
   }, [isConnected, navigate])
   
   const handleJoin = async () => {
@@ -187,6 +224,10 @@ function ReferralLanding() {
             <li>✅ Referral rewards for both you and your friend</li>
           </ul>
         </div>
+        
+        <div className="referral-debug">
+          <p><small>Debug: Referral code stored: {sessionStorage.getItem('pendingReferrer') || 'none'}</small></p>
+        </div>
       </div>
     </div>
   )
@@ -199,13 +240,20 @@ function Dashboard() {
   const [claimed, setClaimed] = useState(false)
   const [loading, setLoading] = useState(false)
   const [referralCount, setReferralCount] = useState(0)
+  const [referredBy, setReferredBy] = useState<string | null>(null)
   const navigate = useNavigate()
   
-  // Load referral count from localStorage
+  // Load referral data
   useEffect(() => {
     if (wallet) {
       const count = getReferralCount(wallet.smartWallet)
       setReferralCount(count)
+      
+      const referrer = getReferrer(wallet.smartWallet)
+      setReferredBy(referrer)
+      
+      console.log(`Wallet ${wallet.smartWallet} has ${count} referrals`)
+      console.log(`Referred by: ${referrer || 'No one'}`)
     }
   }, [wallet])
   
@@ -216,7 +264,7 @@ function Dashboard() {
     }
   }, [wallet, navigate])
   
-  // Generate referral link with HashRouter format
+  // Generate referral link
   const referralCode = wallet ? `ref_${wallet.smartWallet.slice(0, 8)}` : ''
   const referralLink = `${window.location.origin}/#/ref/${referralCode}`
   
@@ -231,7 +279,6 @@ function Dashboard() {
     
     setLoading(true)
     try {
-      // Fixed: Call signMessage directly from the hook
       const message = `Claim Welcome Badge for wallet: ${wallet.smartWallet} at ${Date.now()}`
       console.log('Signing message:', message)
       
@@ -242,12 +289,7 @@ function Dashboard() {
       alert('✅ Badge claimed successfully!\nSignature: ' + result.signature.slice(0, 20) + '...')
     } catch (error: any) {
       console.error('Failed to claim badge:', error)
-      
-      if (error.message?.includes('WebAuthn') || error.message?.includes('TLS')) {
-        alert('❌ WebAuthn requires HTTPS. Make sure you are using HTTPS for this demo.')
-      } else {
-        alert(`Failed to claim badge: ${error.message || 'Unknown error'}`)
-      }
+      alert(`Failed to claim badge: ${error.message || 'Unknown error'}`)
     } finally {
       setLoading(false)
     }
@@ -257,6 +299,25 @@ function Dashboard() {
     await disconnect()
     navigate('/')
   }
+  
+  // const handleTestReferral = () => {
+  //   // Create a test referral (for demo purposes)
+  //   if (wallet) {
+  //     const testWallet = 'test_wallet_' + Date.now()
+  //     trackReferral(wallet.smartWallet, testWallet)
+  //     setReferralCount(prev => prev + 1)
+  //     alert('✅ Test referral added! Refresh to see actual referrals from links.')
+  //   }
+  // }
+  
+  // const handleResetData = () => {
+  //   if (window.confirm('Reset all referral data? This cannot be undone.')) {
+  //     localStorage.removeItem('referralData')
+  //     setReferralCount(0)
+  //     setReferredBy(null)
+  //     alert('Referral data reset!')
+  //   }
+  // }
   
   if (!wallet) return null
   
@@ -283,6 +344,11 @@ function Dashboard() {
           <p className="wallet-address">
             {wallet?.smartWallet.slice(0, 12)}...
           </p>
+          {referredBy && (
+            <p className="referred-by">
+              👥 Referred by: {referredBy.slice(0, 8)}...
+            </p>
+          )}
         </div>
       </div>
       
@@ -309,6 +375,10 @@ function Dashboard() {
           <div className="stat">
             <span className="stat-number">{points}</span>
             <span className="stat-label">Points</span>
+          </div>
+          <div className="stat">
+            <span className="stat-number">{referredBy ? 'Yes' : 'No'}</span>
+            <span className="stat-label">Referred</span>
           </div>
         </div>
       </div>
