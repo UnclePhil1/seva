@@ -11,6 +11,27 @@ const CONFIG = {
   }
 }
 
+// Store referral counts in localStorage for demo
+const getReferralCount = (walletAddress: string): number => {
+  try {
+    const counts = JSON.parse(localStorage.getItem('referralCounts') || '{}')
+    return counts[walletAddress] || 0
+  } catch {
+    return 0
+  }
+}
+
+const incrementReferralCount = (walletAddress: string) => {
+  try {
+    const counts = JSON.parse(localStorage.getItem('referralCounts') || '{}')
+    counts[walletAddress] = (counts[walletAddress] || 0) + 1
+    localStorage.setItem('referralCounts', JSON.stringify(counts))
+    return counts[walletAddress]
+  } catch {
+    return 0
+  }
+}
+
 // Connect Button Component
 function ConnectButton() {
   const { connect, disconnect, isConnected, wallet } = useWallet()
@@ -19,7 +40,7 @@ function ConnectButton() {
   const handleConnect = async () => {
     try {
       await connect({ feeMode: 'paymaster' })
-      navigate('/dashboard') // Navigate to dashboard after connecting
+      navigate('/dashboard')
     } catch (error) {
       console.error('Connection failed:', error)
     }
@@ -27,7 +48,7 @@ function ConnectButton() {
   
   const handleDisconnect = async () => {
     await disconnect()
-    navigate('/') // Navigate to home after disconnecting
+    navigate('/')
   }
   
   if (isConnected && wallet) {
@@ -53,7 +74,6 @@ function HomePage() {
   const { isConnected } = useWallet()
   const navigate = useNavigate()
   
-  // If already connected, redirect to dashboard
   useEffect(() => {
     if (isConnected) {
       navigate('/dashboard')
@@ -102,9 +122,33 @@ function ReferralLanding() {
   const navigate = useNavigate()
   const { connect, isConnected } = useWallet()
   
-  // If already connected, redirect to dashboard
+  // Track referral visit
+  useEffect(() => {
+    if (refCode) {
+      // Store the referrer code for when user signs up
+      localStorage.setItem('referrer', refCode)
+      console.log(`Referral visit from: ${refCode}`)
+    }
+  }, [refCode])
+  
   useEffect(() => {
     if (isConnected) {
+      // Get referrer from localStorage
+      const referrer = localStorage.getItem('referrer')
+      if (referrer && referrer.startsWith('ref_')) {
+        // Extract wallet address from ref_abc123def format
+        const referrerWallet = referrer.replace('ref_', '')
+        
+        // In a real app, you'd send this to your backend/on-chain
+        console.log(`User connected via referral from: ${referrerWallet}`)
+        
+        // Increment referral count for the referrer
+        incrementReferralCount(referrerWallet)
+        
+        // Clear the referrer after processing
+        localStorage.removeItem('referrer')
+      }
+      
       navigate('/dashboard')
     }
   }, [isConnected, navigate])
@@ -112,7 +156,6 @@ function ReferralLanding() {
   const handleJoin = async () => {
     try {
       await connect({ feeMode: 'paymaster' })
-      navigate('/dashboard')
     } catch (error) {
       console.error('Connection failed:', error)
     }
@@ -151,11 +194,20 @@ function ReferralLanding() {
 
 // Dashboard Page
 function Dashboard() {
-  const { wallet, disconnect } = useWallet()
+  const { wallet, disconnect, signMessage } = useWallet()
   const [copied, setCopied] = useState(false)
   const [claimed, setClaimed] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [referralCount, setReferralCount] = useState(0)
   const navigate = useNavigate()
+  
+  // Load referral count from localStorage
+  useEffect(() => {
+    if (wallet) {
+      const count = getReferralCount(wallet.smartWallet)
+      setReferralCount(count)
+    }
+  }, [wallet])
   
   // Redirect to home if not connected
   useEffect(() => {
@@ -164,9 +216,9 @@ function Dashboard() {
     }
   }, [wallet, navigate])
   
-  // Generate referral link
+  // Generate referral link with HashRouter format
   const referralCode = wallet ? `ref_${wallet.smartWallet.slice(0, 8)}` : ''
-  const referralLink = `${window.location.origin}/ref/${referralCode}`
+  const referralLink = `${window.location.origin}/#/ref/${referralCode}`
   
   const copyLink = () => {
     navigator.clipboard.writeText(referralLink)
@@ -175,17 +227,27 @@ function Dashboard() {
   }
   
   const claimBadge = async () => {
-    if (!wallet) return
+    if (!wallet || loading) return
     
     setLoading(true)
     try {
-      const { signMessage } = useWallet()
-      await signMessage(`Claim badge: ${Date.now()}`)
+      // Fixed: Call signMessage directly from the hook
+      const message = `Claim Welcome Badge for wallet: ${wallet.smartWallet} at ${Date.now()}`
+      console.log('Signing message:', message)
+      
+      const result = await signMessage(message)
+      console.log('Signature received:', result.signature)
+      
       setClaimed(true)
-      alert('✅ Badge claimed successfully!')
-    } catch (error) {
-      console.error('Failed:', error)
-      alert('Failed to claim badge. Please try again.')
+      alert('✅ Badge claimed successfully!\nSignature: ' + result.signature.slice(0, 20) + '...')
+    } catch (error: any) {
+      console.error('Failed to claim badge:', error)
+      
+      if (error.message?.includes('WebAuthn') || error.message?.includes('TLS')) {
+        alert('❌ WebAuthn requires HTTPS. Make sure you are using HTTPS for this demo.')
+      } else {
+        alert(`Failed to claim badge: ${error.message || 'Unknown error'}`)
+      }
     } finally {
       setLoading(false)
     }
@@ -193,12 +255,13 @@ function Dashboard() {
   
   const handleDisconnect = async () => {
     await disconnect()
-    navigate('/') // Navigate to home after disconnecting
+    navigate('/')
   }
   
-  if (!wallet) {
-    return null // Will redirect in useEffect
-  }
+  if (!wallet) return null
+  
+  // Calculate points (10 points per referral)
+  const points = referralCount * 10
   
   return (
     <div className="dashboard">
@@ -225,6 +288,7 @@ function Dashboard() {
       
       <div className="referral-section">
         <h3>📤 Your Referral Link</h3>
+        <p className="help-text">Share this link with friends. When they join, your count increases!</p>
         <div className="link-box">
           <input 
             type="text" 
@@ -236,15 +300,14 @@ function Dashboard() {
             {copied ? '✅ Copied!' : '📋 Copy'}
           </button>
         </div>
-        <p className="help-text">Share this link with friends to earn rewards</p>
         
         <div className="referral-stats">
           <div className="stat">
-            <span className="stat-number">0</span>
+            <span className="stat-number">{referralCount}</span>
             <span className="stat-label">Referrals</span>
           </div>
           <div className="stat">
-            <span className="stat-number">0</span>
+            <span className="stat-number">{points}</span>
             <span className="stat-label">Points</span>
           </div>
         </div>
@@ -264,16 +327,16 @@ function Dashboard() {
             disabled={claimed || loading}
             className="task-btn"
           >
-            {loading ? 'Claiming...' : claimed ? 'Claimed' : 'Claim Badge (Gasless)'}
+            {loading ? 'Signing...' : claimed ? '✅ Claimed' : '🖋️ Sign Message (Gasless)'}
           </button>
-          <p className="task-note">Sign a message to claim your badge</p>
+          <p className="task-note">Signs a message with your passkey. No SOL required.</p>
         </div>
       </div>
     </div>
   )
 }
 
-// Main App with Router
+// Main App with HashRouter
 function AppContent() {
   return (
     <Router>
